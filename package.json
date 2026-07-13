@@ -1,0 +1,52 @@
+{
+  "name": "focus-trap",
+  "version": "0.0.0",
+  "description": "A lightweight, dependency-free focus trap library written in TypeScript.",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "focus",
+    "focus-trap",
+    "accessibility",
+    "a11y",
+    "keyboard",
+    "tabindex",
+    "typescript"
+  ],
+  "author": "",
+  "main": "./dist/focus-trap.cjs",
+  "module": "./dist/focus-trap.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/focus-trap.js",
+      "require": "./dist/focus-trap.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "@vitest/coverage-v8": "^4.1.10",
+    "jsdom": "^29.1.1",
+    "typescript": "^5.4.0",
+    "vite": "^5.2.0",
+    "vite-plugin-dts": "^3.9.0",
+    "vitest": "^4.1.10"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
