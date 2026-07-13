@@ -29,6 +29,11 @@ function pressTab(shiftKey = false): void {
   (document.activeElement ?? document.body).dispatchEvent(event);
 }
 
+/** MutationObserver callbacks run in a microtask; let them settle. */
+function flushMutations(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 afterEach(() => {
   document.body.innerHTML = '';
 });
@@ -157,5 +162,66 @@ describe('createFocusTrap', () => {
     trap.deactivate();
 
     expect(document.activeElement).toBe(trigger);
+  });
+
+  it('deactivates on outside pointerdown when clickOutsideDeactivates is set', () => {
+    const outside = document.createElement('button');
+    document.body.append(outside);
+    const { container } = mountContainer();
+    const trap = createFocusTrap(container, { clickOutsideDeactivates: true });
+    trap.activate();
+
+    outside.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+
+    expect(trap.active).toBe(false);
+  });
+
+  it('ignores pointerdown inside the container', () => {
+    const { container, buttons } = mountContainer();
+    const trap = createFocusTrap(container, { clickOutsideDeactivates: true });
+    trap.activate();
+
+    buttons[1].dispatchEvent(new Event('pointerdown', { bubbles: true }));
+
+    expect(trap.active).toBe(true);
+  });
+
+  it('does not deactivate on outside pointerdown by default', () => {
+    const outside = document.createElement('button');
+    document.body.append(outside);
+    const { container } = mountContainer();
+    const trap = createFocusTrap(container);
+    trap.activate();
+
+    outside.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+
+    expect(trap.active).toBe(true);
+  });
+
+  it('pulls focus back inside when the focused element is removed', async () => {
+    const { container, buttons } = mountContainer();
+    const trap = createFocusTrap(container);
+    trap.activate();
+
+    buttons[1].focus();
+    buttons[1].remove();
+    await flushMutations();
+
+    expect(container.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).toBe(buttons[0]);
+  });
+
+  it('includes dynamically added elements in the tab cycle', () => {
+    const { container, buttons } = mountContainer();
+    const trap = createFocusTrap(container);
+    trap.activate();
+
+    const added = document.createElement('button');
+    container.append(added);
+
+    added.focus(); // the new last element wraps around to the first
+    pressTab();
+
+    expect(document.activeElement).toBe(buttons[0]);
   });
 });

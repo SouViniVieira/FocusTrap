@@ -1,46 +1,30 @@
 /**
  * focus-trap — a lightweight, dependency-free focus trap.
  *
- * A focus trap keeps keyboard focus (Tab / Shift+Tab) confined to a container
- * element while it is active. This is a core accessibility pattern for modals,
- * dialogs, drawers and any overlay that should not let focus escape to the
- * content behind it.
+ * Confines keyboard focus (Tab / Shift+Tab) to a container while active, then
+ * restores focus on deactivate. Core accessibility pattern for modals, dialogs
+ * and overlays.
  */
 
 /** Options accepted by {@link createFocusTrap}. */
 export interface FocusTrapOptions {
-  /**
-   * The element that receives focus when the trap is activated. May be an
-   * element or a function returning one. When omitted, the first focusable
-   * element in the container is used, falling back to the container itself.
-   */
+  /** Element focused on activation. Defaults to the first focusable element, then the container. */
   initialFocus?: HTMLElement | (() => HTMLElement | null) | undefined;
-  /**
-   * When `true` (the default), focus is returned to the element that was
-   * focused before activation once the trap is deactivated.
-   */
+  /** Restore focus to the pre-activation element on deactivate. Default `true`. */
   returnFocusOnDeactivate?: boolean | undefined;
-  /**
-   * When `true` (the default), pressing Escape while the trap is active
-   * deactivates it.
-   */
+  /** Deactivate when Escape is pressed. Default `true`. */
   escapeDeactivates?: boolean | undefined;
+  /** Deactivate when a pointer press lands outside the container. Default `false`. */
+  clickOutsideDeactivates?: boolean | undefined;
 }
 
 /** The public handle returned by {@link createFocusTrap}. */
 export interface FocusTrap {
-  /** Activate the trap: move focus inside and start confining Tab presses. */
   activate: () => void;
-  /** Deactivate the trap and, by default, restore the previous focus. */
   deactivate: () => void;
-  /** Whether the trap is currently active. */
   readonly active: boolean;
 }
 
-/**
- * Selector matching elements that are potentially focusable. Actual focusability
- * is refined at runtime (visibility, `disabled`, negative `tabindex`, ...).
- */
 const FOCUSABLE_SELECTOR = [
   'a[href]',
   'area[href]',
@@ -57,27 +41,19 @@ const FOCUSABLE_SELECTOR = [
   '[tabindex]',
 ].join(',');
 
-/**
- * Whether an element is visible in the layout. Uses computed styles rather than
- * `offsetParent`/bounding rects so it stays correct for `position: fixed`
- * elements and in environments that don't compute layout. Only *explicitly*
- * hidden elements are excluded; anything ambiguous is treated as visible.
- */
+// Computed styles rather than offsetParent/rects: correct for position:fixed
+// and in environments that don't compute layout (jsdom). Only explicitly
+// hidden elements are excluded; anything ambiguous counts as visible.
 function isVisible(el: HTMLElement): boolean {
   let node: HTMLElement | null = el;
   while (node !== null) {
     if (getComputedStyle(node).display === 'none') return false;
     node = node.parentElement;
   }
-  // `visibility` inherits, so checking the element itself is sufficient.
-  const { visibility } = getComputedStyle(el);
+  const { visibility } = getComputedStyle(el); // inherits, so the element alone is enough
   return visibility !== 'hidden' && visibility !== 'collapse';
 }
 
-/**
- * Determine whether an element is actually focusable right now: visible,
- * not disabled, not `inert`, and not opted out with `tabindex="-1"`.
- */
 function isFocusable(el: HTMLElement): boolean {
   if (el.hasAttribute('disabled')) return false;
   if (el.getAttribute('aria-hidden') === 'true') return false;
@@ -89,7 +65,6 @@ function isFocusable(el: HTMLElement): boolean {
   return isVisible(el);
 }
 
-/** Collect the focusable elements inside `container`, in DOM order. */
 function getFocusableElements(container: HTMLElement): HTMLElement[] {
   const candidates = container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
   const result: HTMLElement[] = [];
@@ -117,15 +92,10 @@ function resolveInitialFocus(
 /**
  * Create a focus trap bound to `element`.
  *
- * @param element - The container that focus should be confined to.
- * @param options - Optional behaviour overrides. See {@link FocusTrapOptions}.
- * @returns A {@link FocusTrap} handle with `activate` / `deactivate`.
- *
  * @example
  * ```ts
  * const trap = createFocusTrap(document.querySelector('#modal')!);
  * trap.activate();
- * // ...later
  * trap.deactivate();
  * ```
  */
@@ -137,10 +107,17 @@ export function createFocusTrap(
     initialFocus,
     returnFocusOnDeactivate = true,
     escapeDeactivates = true,
+    clickOutsideDeactivates = false,
   } = options;
 
   let isActive = false;
   let previouslyFocused: HTMLElement | null = null;
+  let observer: MutationObserver | null = null;
+
+  function focusFirst(): void {
+    const focusable = getFocusableElements(element);
+    (focusable[0] ?? element).focus();
+  }
 
   function onKeydown(event: KeyboardEvent): void {
     if (!isActive) return;
@@ -155,7 +132,6 @@ export function createFocusTrap(
 
     const focusable = getFocusableElements(element);
     if (focusable.length === 0) {
-      // Nothing to focus inside: keep focus pinned on the container itself.
       event.preventDefault();
       element.focus();
       return;
@@ -166,17 +142,32 @@ export function createFocusTrap(
     const current = document.activeElement;
 
     if (event.shiftKey) {
-      // Shift+Tab from the first element wraps to the last.
       if (current === first || !element.contains(current)) {
         event.preventDefault();
         last.focus();
       }
     } else {
-      // Tab from the last element wraps to the first.
       if (current === last || !element.contains(current)) {
         event.preventDefault();
         first.focus();
       }
+    }
+  }
+
+  function onPointerDown(event: Event): void {
+    if (!isActive) return;
+    const target = event.target;
+    if (target instanceof Node && !element.contains(target)) {
+      deactivate();
+    }
+  }
+
+  // Dynamic content can remove the focused node, dropping focus to <body> and
+  // escaping the trap; pull it back in when that happens.
+  function onMutation(): void {
+    if (!isActive) return;
+    if (!element.contains(document.activeElement)) {
+      focusFirst();
     }
   }
 
@@ -189,15 +180,20 @@ export function createFocusTrap(
         ? document.activeElement
         : null;
 
-    // The container needs to be programmatically focusable as a fallback.
+    // Fallback focus target when the container has nothing focusable.
     if (!element.hasAttribute('tabindex')) {
       element.setAttribute('tabindex', '-1');
     }
 
     document.addEventListener('keydown', onKeydown, true);
+    if (clickOutsideDeactivates) {
+      document.addEventListener('pointerdown', onPointerDown, true);
+    }
 
-    const target = resolveInitialFocus(element, initialFocus);
-    target.focus();
+    observer = new MutationObserver(onMutation);
+    observer.observe(element, { childList: true, subtree: true });
+
+    resolveInitialFocus(element, initialFocus).focus();
   }
 
   function deactivate(): void {
@@ -205,6 +201,9 @@ export function createFocusTrap(
     isActive = false;
 
     document.removeEventListener('keydown', onKeydown, true);
+    document.removeEventListener('pointerdown', onPointerDown, true);
+    observer?.disconnect();
+    observer = null;
 
     if (returnFocusOnDeactivate && previouslyFocused !== null) {
       previouslyFocused.focus();

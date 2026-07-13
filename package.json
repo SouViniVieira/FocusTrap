@@ -1,6 +1,6 @@
 {
   "name": "focus-trap",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "A lightweight, dependency-free focus trap library written in TypeScript.",
   "type": "module",
   "license": "MIT",
@@ -13,7 +13,7 @@
     "tabindex",
     "typescript"
   ],
-  "author": "",
+  "author": "Vinícius Vieira",
   "main": "./dist/focus-trap.cjs",
   "module": "./dist/focus-trap.js",
   "types": "./dist/index.d.ts",

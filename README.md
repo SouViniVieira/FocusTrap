@@ -51,6 +51,7 @@ Creates a focus trap bound to `element`. Returns a `FocusTrap` handle.
 | `initialFocus`            | `HTMLElement \| (() => HTMLElement \| null)`    | —       | Element focused on activation. Defaults to the first focusable element, falling back to the container. |
 | `returnFocusOnDeactivate` | `boolean`                                       | `true`  | Restore focus to the previously focused element on deactivate.                                       |
 | `escapeDeactivates`       | `boolean`                                       | `true`  | Pressing <kbd>Escape</kbd> deactivates the trap.                                                     |
+| `clickOutsideDeactivates` | `boolean`                                       | `false` | A pointer press outside the container deactivates the trap.                                          |
 
 ### `FocusTrap`
 
@@ -68,10 +69,15 @@ and then filters out elements that are `disabled`, `aria-hidden="true"`, inside
 an `[inert]` subtree, opted out via a negative `tabindex`, or hidden via
 `display: none` / `visibility: hidden`.
 
+The candidate set is recomputed on every Tab press, so content added or removed
+while the trap is active is handled automatically. A `MutationObserver` also
+pulls focus back inside if the currently focused element is removed from the DOM.
+
 ## Development
 
 ```sh
 npm install
+npm run dev       # serve the browser demo (index.html) via Vite
 npm test          # run the test suite (Vitest + jsdom)
 npm run coverage  # run tests with coverage
 npm run build     # produce dist/ (ESM + CJS + types)
