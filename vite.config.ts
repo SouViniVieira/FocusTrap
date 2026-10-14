@@ -6,7 +6,7 @@ export default defineConfig({
   build: {
     lib: {
       // The entry point for the library.
-      entry: resolve(__dirname, 'src/index.ts'),
+      entry: resolve(import.meta.dirname, 'src/index.ts'),
       // Global variable name exposed in the UMD/IIFE build.
       name: 'FocusTrap',
       // Output file name per format.

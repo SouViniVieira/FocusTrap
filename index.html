@@ -3,117 +3,232 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>focus-trap demo</title>
+    <title>focus-trap · interactive demo</title>
+    <meta name="description" content="Try a dependency-free focus trap with your keyboard: dialogs, nested dialogs, a drawer and the tricky cases." />
     <style>
       :root {
-        font-family: system-ui, sans-serif;
-        line-height: 1.5;
+        color-scheme: light dark;
+        --bg: #f6f6f3;
+        --surface: #ffffff;
+        --text: #15171b;
+        --muted: #4d535c;
+        --accent: #2447c9;
+        --accent-contrast: #ffffff;
+        --line: #d9dbd5;
+        --scrim: rgb(21 23 27 / 0.55);
+        font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+        line-height: 1.55;
       }
-      body {
-        margin: 0;
-        padding: 2rem;
-        max-width: 40rem;
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0e1014;
+          --surface: #171a20;
+          --text: #ecedef;
+          --muted: #a6acb6;
+          --accent: #93adff;
+          --accent-contrast: #0e1014;
+          --line: #2c313a;
+          --scrim: rgb(0 0 0 / 0.7);
+        }
       }
-      button,
-      input {
-        font: inherit;
-        padding: 0.4rem 0.7rem;
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); color: var(--text); }
+      main { max-width: 46rem; margin: 0 auto; padding: 3rem 1.25rem 4rem; }
+      h1 { font-size: clamp(2rem, 5vw, 2.75rem); line-height: 1.1; margin: 0.5rem 0 1rem; }
+      h2 { margin-top: 2.75rem; font-size: 1.35rem; }
+      p, li { color: var(--muted); }
+      a { color: var(--accent); }
+      kbd { font: 600 0.85em ui-monospace, monospace; padding: 0.1em 0.4em; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--text); }
+      .eyebrow { font: 600 0.85rem ui-monospace, monospace; color: var(--accent); }
+      .row { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 1rem; }
+      button, input, select { font: inherit; }
+      button {
+        min-height: 2.75rem; padding: 0 1.1rem; border-radius: 0.6rem; cursor: pointer;
+        border: 2px solid var(--muted); background: var(--surface); color: var(--text); font-weight: 600;
       }
-      .stack > * + * {
-        margin-top: 0.75rem;
+      button.primary { border-color: var(--accent); background: var(--accent); color: var(--accent-contrast); }
+      :focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+      .card { margin-top: 1rem; padding: 1.25rem; border: 1px solid var(--line); border-radius: 1rem; background: var(--surface); }
+
+      /* Overlays */
+      .scrim { position: fixed; inset: 0; background: var(--scrim); display: grid; place-items: center; padding: 1rem; }
+      .scrim[hidden] { display: none; }
+      .dialog {
+        width: min(30rem, 100%); max-height: calc(100dvh - 2rem); overflow: auto;
+        padding: 1.5rem; border-radius: 1rem; background: var(--surface); color: var(--text);
+        border: 1px solid var(--line);
       }
-      .backdrop {
-        position: fixed;
-        inset: 0;
-        display: none;
-        place-items: center;
-        background: rgb(0 0 0 / 0.4);
-      }
-      .backdrop[data-open] {
-        display: grid;
-      }
-      .modal {
-        background: white;
-        padding: 1.5rem;
-        border-radius: 0.5rem;
-        min-width: 20rem;
-      }
-      .row {
-        display: flex;
-        gap: 0.5rem;
-        flex-wrap: wrap;
-      }
+      .dialog h2 { margin-top: 0; }
+      label { display: block; font-weight: 600; margin-top: 1rem; color: var(--text); }
+      input[type='text'], select { width: 100%; min-height: 2.75rem; padding: 0 0.75rem; margin-top: 0.35rem; border: 2px solid var(--muted); border-radius: 0.5rem; background: var(--surface); color: var(--text); }
+      fieldset { margin: 1rem 0 0; padding: 0.75rem 1rem 1rem; border: 1px solid var(--line); border-radius: 0.6rem; }
+      fieldset label { display: flex; gap: 0.5rem; align-items: center; font-weight: 400; margin-top: 0.4rem; }
+      legend { font-weight: 600; padding: 0 0.35rem; }
+      .drawer-scrim { place-items: stretch end; padding: 0; }
+      .drawer { width: min(20rem, 85vw); height: 100%; border-radius: 0; border-width: 0 0 0 1px; }
+      .drawer nav ul { list-style: none; padding: 0; margin: 1rem 0; }
+      .drawer nav a { display: block; padding: 0.6rem 0; }
+
+      /* Event log */
+      .log { margin-top: 1rem; font: 0.85rem ui-monospace, monospace; }
+      .log ol { margin: 0.5rem 0 0; padding-left: 1.25rem; max-height: 9rem; overflow: auto; }
+      .log li { color: var(--text); }
+      .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+      @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
     </style>
   </head>
   <body>
-    <h1>focus-trap demo</h1>
-    <p>
-      Tab around the page, then open the modal. Focus should stay inside it.
-      Use the buttons below to exercise dynamic content and the options.
-    </p>
+    <main>
+      <p class="eyebrow">@souvinivieira/focus-trap · demo</p>
+      <h1>Keep keyboard focus where it belongs</h1>
+      <p>
+        Put the mouse aside and use <kbd>Tab</kbd>, <kbd>Shift</kbd>+<kbd>Tab</kbd> and <kbd>Esc</kbd>.
+        When an overlay is open, focus cycles inside it and goes back to where you were when it closes.
+        <a href="https://github.com/SouViniVieira/FocusTrap">Source on GitHub</a>.
+      </p>
 
-    <div class="stack">
-      <button id="open">Open modal</button>
-      <a href="https://example.com">A link outside the trap</a>
+      <h2>1. A form in a dialog</h2>
+      <p>
+        Includes the tricky cases: a radio group (one tab stop, arrows inside), a disabled fieldset
+        and a collapsed <code>&lt;details&gt;</code>. Escape or a click on the backdrop closes it.
+      </p>
+      <div class="row"><button class="primary" id="open-form">Open dialog</button></div>
+
+      <h2>2. A dialog that opens another</h2>
+      <p>
+        The confirmation pauses the first trap. Closing it hands focus back to the button that opened it,
+        and the first trap takes over again.
+      </p>
+      <div class="row"><button id="open-delete">Delete project…</button></div>
+
+      <h2>3. A navigation drawer</h2>
+      <p>Drawers are rarely a native <code>&lt;dialog&gt;</code>, which is exactly where a focus trap earns its place.</p>
+      <div class="row"><button id="open-drawer" aria-expanded="false" aria-controls="drawer">Open menu</button></div>
+
+      <section class="card log" aria-labelledby="log-title">
+        <strong id="log-title">Event log</strong>
+        <ol id="log"></ol>
+      </section>
+      <p id="announcer" class="visually-hidden" aria-live="polite"></p>
+    </main>
+
+    <!-- 1. Form dialog -->
+    <div class="scrim" id="form-scrim" hidden>
+      <div class="dialog" id="form-dialog" role="dialog" aria-modal="true" aria-labelledby="form-title">
+        <h2 id="form-title">Request access</h2>
+        <label for="name">Full name</label>
+        <input type="text" id="name" autocomplete="name" />
+
+        <fieldset>
+          <legend>Access level</legend>
+          <label><input type="radio" name="level" value="read" checked /> Read</label>
+          <label><input type="radio" name="level" value="edit" /> Edit</label>
+          <label><input type="radio" name="level" value="admin" /> Admin</label>
+        </fieldset>
+
+        <fieldset disabled>
+          <legend>Billing (not available on this plan)</legend>
+          <label for="card">Card number</label>
+          <input type="text" id="card" />
+        </fieldset>
+
+        <details>
+          <summary>Advanced options</summary>
+          <label for="team">Team</label>
+          <select id="team"><option>Design</option><option>Engineering</option></select>
+        </details>
+
+        <div class="row">
+          <button class="primary" data-close>Send request</button>
+          <button data-close>Cancel</button>
+        </div>
+      </div>
     </div>
 
-    <div class="backdrop" id="backdrop">
-      <div class="modal" id="modal" role="dialog" aria-modal="true" aria-label="Demo dialog">
-        <div class="stack">
-          <h2>Trapped dialog</h2>
-          <input id="name" type="text" placeholder="Your name" />
-          <div class="row" id="dynamic-host">
-            <button id="add">Add a field</button>
-            <button id="remove-self">Remove me</button>
-          </div>
-          <div class="row">
-            <button id="close">Close</button>
-            <button id="confirm">Confirm</button>
-          </div>
-          <p><small>Esc closes. Click the backdrop to close (clickOutsideDeactivates).</small></p>
+    <!-- 2. Nested dialogs -->
+    <div class="scrim" id="delete-scrim" hidden>
+      <div class="dialog" id="delete-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-title">
+        <h2 id="delete-title">Delete project</h2>
+        <p>This removes the project for everyone on the team.</p>
+        <div class="row">
+          <button class="primary" id="ask-confirm">Delete…</button>
+          <button data-close>Keep project</button>
         </div>
+      </div>
+    </div>
+    <div class="scrim" id="confirm-scrim" hidden>
+      <div class="dialog" id="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-desc">
+        <h2 id="confirm-title">Are you sure?</h2>
+        <p id="confirm-desc">You can't undo this.</p>
+        <div class="row">
+          <button data-close>Go back</button>
+          <button class="primary" data-close>Yes, delete</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. Drawer -->
+    <div class="scrim drawer-scrim" id="drawer-scrim" hidden>
+      <div class="dialog drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+        <h2 id="drawer-title">Menu</h2>
+        <nav aria-label="Demo">
+          <ul>
+            <li><a href="#log-title">Event log</a></li>
+            <li><a href="https://github.com/SouViniVieira/FocusTrap#api">API reference</a></li>
+            <li><a href="https://vini-vieira.com">Author's portfolio</a></li>
+          </ul>
+        </nav>
+        <button data-close>Close menu</button>
       </div>
     </div>
 
     <script type="module">
       import { createFocusTrap } from './src/index.ts';
 
-      const backdrop = document.getElementById('backdrop');
-      const modal = document.getElementById('modal');
-      const trap = createFocusTrap(modal, { clickOutsideDeactivates: true });
-
-      function open() {
-        backdrop.setAttribute('data-open', '');
-        trap.activate();
+      const logList = document.getElementById('log');
+      const announcer = document.getElementById('announcer');
+      function log(message) {
+        const item = document.createElement('li');
+        item.textContent = message;
+        logList.prepend(item);
       }
 
-      function close() {
-        trap.deactivate();
-        backdrop.removeAttribute('data-open');
+      /** Wire an overlay: show it, trap focus, and hide it however the trap ends. */
+      function overlay({ scrim, panel, name, trigger }) {
+        const scrimEl = document.getElementById(scrim);
+        const panelEl = document.getElementById(panel);
+        const trap = createFocusTrap(panelEl, {
+          clickOutsideDeactivates: true,
+          onActivate: () => log(`${name}: trap on`),
+          onDeactivate: (reason) => {
+            scrimEl.hidden = true;
+            trigger?.setAttribute('aria-expanded', 'false');
+            log(`${name}: closed (${reason})`);
+            announcer.textContent = `${name} closed`;
+          },
+        });
+        panelEl.querySelectorAll('[data-close]').forEach((button) =>
+          button.addEventListener('click', () => trap.deactivate()),
+        );
+        return {
+          open() {
+            scrimEl.hidden = false;
+            trigger?.setAttribute('aria-expanded', 'true');
+            trap.activate();
+          },
+        };
       }
 
-      document.getElementById('open').addEventListener('click', open);
-      document.getElementById('close').addEventListener('click', close);
-      document.getElementById('confirm').addEventListener('click', close);
+      const form = overlay({ scrim: 'form-scrim', panel: 'form-dialog', name: 'Dialog' });
+      const remove = overlay({ scrim: 'delete-scrim', panel: 'delete-dialog', name: 'Delete dialog' });
+      const confirm = overlay({ scrim: 'confirm-scrim', panel: 'confirm-dialog', name: 'Confirmation' });
+      const drawerTrigger = document.getElementById('open-drawer');
+      const drawer = overlay({ scrim: 'drawer-scrim', panel: 'drawer', name: 'Menu', trigger: drawerTrigger });
 
-      // Re-hide the backdrop whenever the trap turns itself off.
-      backdrop.addEventListener('focusout', () => {
-        if (!trap.active) backdrop.removeAttribute('data-open');
-      });
-
-      // Dynamic content: verify the observer keeps focus inside on removal and
-      // that new fields join the tab cycle.
-      let counter = 0;
-      document.getElementById('add').addEventListener('click', () => {
-        const field = document.createElement('input');
-        field.type = 'text';
-        field.placeholder = `Extra field ${++counter}`;
-        document.getElementById('dynamic-host').append(field);
-        field.focus();
-      });
-      document.getElementById('remove-self').addEventListener('click', (e) => {
-        e.currentTarget.remove();
-      });
+      document.getElementById('open-form').addEventListener('click', form.open);
+      document.getElementById('open-delete').addEventListener('click', remove.open);
+      document.getElementById('ask-confirm').addEventListener('click', confirm.open);
+      drawerTrigger.addEventListener('click', drawer.open);
     </script>
   </body>
 </html>

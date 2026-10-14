@@ -1,17 +1,21 @@
 {
-  "name": "focus-trap",
-  "version": "0.1.0",
-  "description": "A lightweight, dependency-free focus trap library written in TypeScript.",
+  "name": "@souvinivieira/focus-trap",
+  "version": "0.2.0",
+  "description": "A small, dependency-free focus trap for accessible dialogs, drawers and overlays, written in TypeScript.",
   "type": "module",
   "license": "MIT",
   "keywords": [
+    "a11y",
+    "accessibility",
+    "dialog",
     "focus",
     "focus-trap",
-    "accessibility",
-    "a11y",
+    "inert",
     "keyboard",
+    "modal",
     "tabindex",
-    "typescript"
+    "typescript",
+    "wcag"
   ],
   "author": "Vinícius Vieira",
   "main": "./dist/focus-trap.cjs",
@@ -35,18 +39,28 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "build:demo": "vite build --config vite.demo.config.ts",
+    "preview:demo": "vite preview --config vite.demo.config.ts"
   },
   "devDependencies": {
-    "@types/node": "^26.1.1",
-    "@vitest/coverage-v8": "^4.1.10",
-    "jsdom": "^29.1.1",
-    "typescript": "^5.4.0",
-    "vite": "^5.2.0",
-    "vite-plugin-dts": "^3.9.0",
-    "vitest": "^4.1.10"
+    "@types/node": "^26.6.5",
+    "@vitest/coverage-v8": "^5.0.4",
+    "jsdom": "^30.1.2",
+    "typescript": "^6.0.3",
+    "vite": "^8.3.4",
+    "vite-plugin-dts": "^5.1.2",
+    "vitest": "^5.0.4"
   },
   "publishConfig": {
     "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SouViniVieira/FocusTrap.git"
+  },
+  "homepage": "https://souvinivieira.github.io/FocusTrap/",
+  "engines": {
+    "node": ">=20"
   }
 }
