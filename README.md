@@ -166,7 +166,7 @@ npm run build       # library build: ESM + CJS + types in dist/
 npm run build:demo  # static demo for GitHub Pages in demo-dist/
 ```
 
-CI runs the type check, tests and build on every push and pull request. The demo deploys to GitHub Pages from `main`.
+CI runs the type check, tests and build on every push and pull request. The demo deploys to GitHub Pages from `master`.
 
 ## License
 
