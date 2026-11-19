@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0 (unreleased)
+
+### Added
+- Open shadow roots: elements inside web components are part of the tab cycle, in browser order (slotted content at its slot, positive `tabindex` sorted per shadow root, hosts with `tabindex="-1"` skipped with their shadow content). A container that is itself a shadow host traps inside its shadow root. Native tab order verified in Chrome only.
+
+### Changed
+- Focus tracking sees through shadow boundaries: focus inside a component in the trap counts as inside, focus returns to the inner element rather than its host, and a trigger inside a web component gets focus back on deactivate.
+- With `clickOutsideDeactivates`, a press on a focusable element inside an outside web component no longer pulls focus back to the trigger.
+- `inert`, `aria-hidden`, `display: none` and closed `<details>` on a shadow host now exclude its shadow content.
+- Tab order changes for traps that contain web components: shadow content can now be the first or last stop, and light DOM children that no slot renders no longer count.
+
 ## 0.2.0 (2026-10-13)
 
 ### Added

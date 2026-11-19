@@ -75,14 +75,52 @@ const FOCUSABLE_SELECTOR = [
   '[tabindex]',
 ].join(',');
 
+/**
+ * The element's parent in the rendered tree: the slot it is assigned to, its
+ * parent, or, at the top of a shadow root, the shadow host.
+ */
+function renderedParent(el: Element): Element | null {
+  if (el.assignedSlot !== null) return el.assignedSlot;
+  if (el.parentElement !== null) return el.parentElement;
+  const root = el.getRootNode();
+  return root instanceof ShadowRoot ? root.host : null;
+}
+
+/** Like `Element.closest`, but keeps climbing out of shadow roots. */
+function closestRendered(el: Element, selector: string): Element | null {
+  for (let node: Element | null = el; node !== null; node = renderedParent(node)) {
+    if (node.matches(selector)) return node;
+  }
+  return null;
+}
+
+/** Like `Node.contains`, but also looks inside shadow roots. */
+function containsDeep(ancestor: Node, node: Node | null): boolean {
+  while (node !== null) {
+    if (node === ancestor) return true;
+    node = node.parentNode ?? (node instanceof ShadowRoot ? node.host : null);
+  }
+  return false;
+}
+
+/** The focused element itself: `document.activeElement` stops at the shadow host. */
+function deepActiveElement(): Element | null {
+  let active = document.activeElement;
+  while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+  return active;
+}
+
+/** The node an event really started on: `event.target` is retargeted to the shadow host. */
+function originalTarget(event: Event): EventTarget | null {
+  return event.composedPath()[0] ?? event.target;
+}
+
 // Computed styles rather than offsetParent/rects: correct for position:fixed
 // and in environments that don't compute layout (jsdom). Only explicitly
 // hidden elements are excluded; anything ambiguous counts as visible.
 function isVisible(el: HTMLElement): boolean {
-  let node: HTMLElement | null = el;
-  while (node !== null) {
+  for (let node: Element | null = el; node !== null; node = renderedParent(node)) {
     if (getComputedStyle(node).display === 'none') return false;
-    node = node.parentElement;
   }
   const { visibility } = getComputedStyle(el); // inherits, so the element alone is enough
   return visibility !== 'hidden' && visibility !== 'collapse';
@@ -90,6 +128,7 @@ function isVisible(el: HTMLElement): boolean {
 
 /** Controls inside a disabled <fieldset> are disabled, except those in its first <legend>. */
 function isInDisabledFieldset(el: HTMLElement): boolean {
+  // Deliberately not crossing shadow boundaries: a fieldset only disables its own tree.
   const fieldset = el.closest('fieldset[disabled]');
   if (fieldset === null) return false;
   const legend = fieldset.querySelector(':scope > legend');
@@ -98,11 +137,10 @@ function isInDisabledFieldset(el: HTMLElement): boolean {
 
 /** Content of a closed <details> is not rendered, except its summary. */
 function isInClosedDetails(el: HTMLElement): boolean {
-  let details = el.closest('details');
-  while (details !== null) {
-    const summary = details.querySelector(':scope > summary');
-    if (!details.open && !(summary !== null && summary.contains(el))) return true;
-    details = details.parentElement?.closest('details') ?? null;
+  for (let node: Element | null = el; node !== null; node = renderedParent(node)) {
+    if (!(node instanceof HTMLDetailsElement) || node.open) continue;
+    const summary = node.querySelector(':scope > summary');
+    if (summary === null || !containsDeep(summary, el)) return true;
   }
   return false;
 }
@@ -115,13 +153,13 @@ function tabIndexOf(el: HTMLElement): number {
 function isTabbable(el: HTMLElement, container: HTMLElement): boolean {
   if (el.hasAttribute('disabled') || isInDisabledFieldset(el)) return false;
   if (el instanceof HTMLInputElement && el.type === 'hidden') return false;
-  if (el.closest('[inert]') !== null) return false;
+  if (closestRendered(el, '[inert]') !== null) return false;
 
   // aria-hidden hides an element from assistive tech, so it must not receive
   // focus either. Only ancestors inside the container count: an overlay can
   // legitimately live next to an aria-hidden page.
-  const hidden = el.closest('[aria-hidden="true"]');
-  if (hidden !== null && container.contains(hidden)) return false;
+  const hidden = closestRendered(el, '[aria-hidden="true"]');
+  if (hidden !== null && containsDeep(container, hidden)) return false;
 
   if (tabIndexOf(el) < 0) return false;
   if (isInClosedDetails(el)) return false;
@@ -147,15 +185,57 @@ function keepOneRadioPerGroup(elements: HTMLElement[]): HTMLElement[] {
   });
 }
 
-/** Tabbable elements in the order the browser visits them: positive tabindex first, then DOM order. */
+/** One slot in a scope's tab order: a single element, or a whole nested scope placed by its owner's tabindex. */
+interface ScopeEntry {
+  tabIndex: number;
+  elements: HTMLElement[];
+}
+
+/**
+ * Tabbable elements of one focus navigation scope, in browser order: positive
+ * tabindex first (stable, so ties keep DOM order), then the rest in DOM order.
+ * Each open shadow root and each <slot> is a scope of its own: its tabindex
+ * values are sorted inside it, and it sits where its host or slot sits.
+ */
+function collectScope(nodes: Iterable<Element>, container: HTMLElement): HTMLElement[] {
+  const entries: ScopeEntry[] = [];
+  const tabbable = (el: Element): el is HTMLElement =>
+    el.matches(FOCUSABLE_SELECTOR) && isTabbable(el as HTMLElement, container);
+
+  const visit = (el: Element): void => {
+    if (el instanceof HTMLSlotElement) {
+      // Assigned elements render in place of the slot; with none, its fallback content does.
+      const content = el.assignedNodes().length > 0 ? el.assignedElements() : [...el.children];
+      entries.push({ tabIndex: tabIndexOf(el), elements: collectScope(content, container) });
+      return;
+    }
+
+    const root = el.shadowRoot; // null for closed roots, which stay out of reach
+    if (root !== null) {
+      // Browsers skip a host with a negative tabindex together with its shadow tree.
+      if (tabIndexOf(el as HTMLElement) < 0) return;
+      const elements = tabbable(el) ? [el] : [];
+      elements.push(...collectScope(root.children, container));
+      entries.push({ tabIndex: tabIndexOf(el as HTMLElement), elements });
+      return; // light DOM children only render through the shadow root's slots
+    }
+
+    if (tabbable(el)) entries.push({ tabIndex: tabIndexOf(el), elements: [el] });
+    for (const child of el.children) visit(child);
+  };
+
+  for (const node of nodes) visit(node);
+
+  const positive = entries.filter((e) => e.tabIndex > 0).sort((a, b) => a.tabIndex - b.tabIndex);
+  const natural = entries.filter((e) => e.tabIndex === 0);
+  return [...positive, ...natural].flatMap((e) => e.elements);
+}
+
+/** Tabbable elements in the order the browser visits them, including those inside open shadow roots. */
 function getTabbableElements(container: HTMLElement): HTMLElement[] {
-  const candidates = [...container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)];
-  const tabbable = keepOneRadioPerGroup(candidates.filter((el) => isTabbable(el, container)));
-  const positive = tabbable
-    .filter((el) => tabIndexOf(el) > 0)
-    .sort((a, b) => tabIndexOf(a) - tabIndexOf(b)); // stable: ties keep DOM order
-  const natural = tabbable.filter((el) => tabIndexOf(el) === 0);
-  return [...positive, ...natural];
+  // A container that is itself a shadow host (a custom element) renders its shadow root.
+  const top = container.shadowRoot ?? container;
+  return keepOneRadioPerGroup(collectScope(top.children, container));
 }
 
 /**
@@ -196,7 +276,7 @@ export function createFocusTrap(element: HTMLElement, options: FocusTrapOptions 
   }
 
   function isInside(node: unknown): boolean {
-    return node instanceof Node && containers().some((c) => c.contains(node));
+    return node instanceof Node && containers().some((c) => containsDeep(c, node));
   }
 
   function resolveInitialFocus(): HTMLElement {
@@ -229,8 +309,8 @@ export function createFocusTrap(element: HTMLElement, options: FocusTrapOptions 
 
     const first = tabbable[0]!;
     const last = tabbable[tabbable.length - 1]!;
-    const current = document.activeElement;
-    const outside = !element.contains(current);
+    const current = deepActiveElement();
+    const outside = !containsDeep(element, current);
 
     if (event.shiftKey && (current === first || outside)) {
       event.preventDefault();
@@ -252,8 +332,9 @@ export function createFocusTrap(element: HTMLElement, options: FocusTrapOptions 
 
   function onFocusIn(event: FocusEvent): void {
     if (!isHandling()) return;
-    if (isInside(event.target)) {
-      if (event.target instanceof HTMLElement) lastFocusedInside = event.target;
+    const target = originalTarget(event);
+    if (isInside(target)) {
+      if (target instanceof HTMLElement) lastFocusedInside = target;
       return;
     }
     // Focus moved out through a click or a script: bring it back.
@@ -261,13 +342,13 @@ export function createFocusTrap(element: HTMLElement, options: FocusTrapOptions 
   }
 
   function onPointerDown(event: Event): void {
-    if (!isHandling() || isInside(event.target)) return;
+    const target = originalTarget(event);
+    if (!isHandling() || isInside(target)) return;
 
     if (clickOutsideDeactivates) {
       // If the press lands on something focusable, focus naturally goes there,
       // so don't fight it by returning focus to the trigger.
-      const lands =
-        event.target instanceof Element && event.target.closest(FOCUSABLE_SELECTOR) !== null;
+      const lands = target instanceof Element && closestRendered(target, FOCUSABLE_SELECTOR) !== null;
       deactivateWith('outside-click', !lands);
       return;
     }
@@ -275,7 +356,7 @@ export function createFocusTrap(element: HTMLElement, options: FocusTrapOptions 
   }
 
   function onClick(event: Event): void {
-    if (!isHandling() || isInside(event.target) || allowOutsideClick || clickOutsideDeactivates) return;
+    if (!isHandling() || isInside(originalTarget(event)) || allowOutsideClick || clickOutsideDeactivates) return;
     event.preventDefault();
     event.stopImmediatePropagation();
   }
@@ -324,7 +405,8 @@ export function createFocusTrap(element: HTMLElement, options: FocusTrapOptions 
 
     isActive = true;
     isPaused = false;
-    previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const active = deepActiveElement(); // the button inside a web component, not its host
+    previouslyFocused = active instanceof HTMLElement ? active : null;
 
     // Fallback focus target when the container has nothing tabbable.
     addedTabindex = !element.hasAttribute('tabindex');

@@ -25,6 +25,7 @@ This library is for the cases where it can't:
 ## What it handles
 
 - **The real tab order.** Positive `tabindex` values first, then document order. A radio group counts as one stop (the checked radio, or the first one), the way browsers do it.
+- **Web components.** Buttons and inputs inside open shadow roots are part of the cycle, in the order the browser visits them: slotted content where its slot is, positive `tabindex` sorted within each shadow root, and a host with `tabindex="-1"` skipped along with its shadow content.
 - **What shouldn't get focus.** Disabled controls, controls inside a disabled `<fieldset>` (except its legend), content of a closed `<details>`, `inert` subtrees, `aria-hidden="true"` regions, negative `tabindex`, and anything hidden with `display` or `visibility`.
 - **Focus that escapes without Tab.** Clicks and scripts that move focus outside are pulled back in. Outside clicks are blocked by default, like a backdrop, and can be allowed or used to close.
 - **Escape that plays well with others.** If a component inside the trap handles <kbd>Esc</kbd> first (a combobox closing its list, say) and calls `preventDefault`, the trap stays open.
@@ -33,7 +34,7 @@ This library is for the cases where it can't:
 - **Portals and dynamic content.** Extra containers (a date picker rendered at the end of `<body>`) can count as inside, and content added or removed while open is handled.
 - **No leftovers.** Listeners, observers and any `tabindex` the trap added are removed on deactivate.
 
-About 1.7 kB minified and gzipped, zero runtime dependencies, fully typed.
+About 2.4 kB minified and gzipped, zero runtime dependencies, fully typed.
 
 ## Usage
 
@@ -152,7 +153,11 @@ Creates a trap bound to `element` and returns a `FocusTrap` handle.
 
 ## Known limitations
 
-- Doesn't look inside shadow roots or iframes when collecting tabbable elements.
+- Doesn't look inside closed shadow roots or iframes, and doesn't special-case `delegatesFocus`.
+- The trap container itself can't live inside a shadow root (it can be a shadow host).
+- If the focused element is removed from inside a shadow root, focus isn't pulled back until the next Tab or focus change: content changes are only watched in the container's light DOM.
+- Radio buttons with the same `name` in different shadow roots are treated as one group.
+- Browsers don't report focus moves inside a single shadow root to the page. If the user tabs between buttons of the same web component and focus then escapes the trap, it returns to the element that was focused when focus entered that component, not the last one inside it.
 - Composite widgets other than radio groups (toolbars, grids with roving `tabindex`) should manage their own internal tab stop with `tabindex="-1"` on the inactive items, which the trap already respects.
 
 ## Development
