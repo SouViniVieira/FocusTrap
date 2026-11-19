@@ -33,10 +33,29 @@ function outsideButton(): HTMLButtonElement {
   return button;
 }
 
-/** Dispatch a Tab keydown from the currently focused element. */
+/** The focused element, following open shadow roots (document.activeElement stops at the host). */
+function deepActiveElement(): Element | null {
+  let active = document.activeElement;
+  while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+  return active;
+}
+
+/** Give the element with `hostId` a shadow root containing `html`. */
+function attachShadowHtml(hostId: string, html: string, mode: ShadowRootMode = 'open'): ShadowRoot {
+  const root = (document.getElementById(hostId) as HTMLElement).attachShadow({ mode });
+  root.innerHTML = html;
+  return root;
+}
+
+/** Find an element by id inside the open shadow root of `hostId`. */
+function inShadow(hostId: string, id: string): HTMLElement {
+  return (document.getElementById(hostId) as HTMLElement).shadowRoot!.getElementById(id) as HTMLElement;
+}
+
+/** Dispatch a Tab keydown from the currently focused element, as a real (composed) key event. */
 function pressTab(shiftKey = false): void {
-  const event = new KeyboardEvent('keydown', { key: 'Tab', shiftKey, bubbles: true, cancelable: true });
-  (document.activeElement ?? document.body).dispatchEvent(event);
+  const event = new KeyboardEvent('keydown', { key: 'Tab', shiftKey, bubbles: true, cancelable: true, composed: true });
+  (deepActiveElement() ?? document.body).dispatchEvent(event);
 }
 
 /** Dispatch an Escape keydown from `target` (default: the focused element). */
@@ -390,6 +409,163 @@ describe('deactivation', () => {
     trap.deactivate();
     expect(onActivate).toHaveBeenCalledOnce();
     expect(onDeactivate).toHaveBeenCalledWith('api');
+  });
+});
+
+describe('open shadow roots', () => {
+  // Expected orders below match Chrome's native Tab navigation.
+
+  it('focuses the first tabbable element inside a shadow root on activate', () => {
+    mountHtml('<div id="host"></div><button id="after">after</button>');
+    attachShadowHtml('host', '<button id="inner">inner</button>');
+    trapOf(document.getElementById('host')!.parentElement!).activate();
+    expect(deepActiveElement()).toBe(inShadow('host', 'inner'));
+  });
+
+  it('wraps Tab from the last element inside a shadow root back to the first', () => {
+    const container = mountHtml('<button id="before">before</button><div id="host"></div>');
+    attachShadowHtml('host', '<button id="a">a</button><button id="b">b</button>');
+    trapOf(container).activate();
+    inShadow('host', 'b').focus();
+    pressTab();
+    expect(deepActiveElement()?.id).toBe('before');
+  });
+
+  it('wraps Shift+Tab from the first element inside a shadow root to the last', () => {
+    const container = mountHtml('<div id="host"></div><button id="after">after</button>');
+    attachShadowHtml('host', '<button id="a">a</button><button id="b">b</button>');
+    trapOf(container).activate();
+    inShadow('host', 'a').focus();
+    pressTab(true);
+    expect(deepActiveElement()?.id).toBe('after');
+  });
+
+  it('looks inside nested shadow roots', () => {
+    const container = mountHtml('<div id="outer"></div><button id="after">after</button>');
+    const outerRoot = attachShadowHtml('outer', '<div id="inner-host"></div>');
+    const innerRoot = (outerRoot.getElementById('inner-host') as HTMLElement).attachShadow({ mode: 'open' });
+    innerRoot.innerHTML = '<button id="deep">deep</button>';
+    trapOf(container).activate();
+    expect(deepActiveElement()).toBe(innerRoot.getElementById('deep'));
+  });
+
+  it('orders slotted elements by their slot, not by light DOM order', () => {
+    const container = mountHtml(`
+      <div id="host"><button id="light-default">default</button><button id="light-b" slot="b">b</button></div>`);
+    attachShadowHtml('host', '<slot name="b"></slot><slot></slot>');
+    trapOf(container).activate();
+    expect(deepActiveElement()?.id).toBe('light-b');
+    pressTab(true);
+    expect(deepActiveElement()?.id).toBe('light-default');
+  });
+
+  it('skips unslotted children and includes slot fallback content', () => {
+    const container = mountHtml('<div id="host"><button id="unslotted">not rendered</button></div>');
+    attachShadowHtml('host', '<button id="sh">sh</button><slot name="x"><button id="fallback">fallback</button></slot>');
+    trapOf(container).activate();
+    expect(deepActiveElement()?.id).toBe('sh');
+    pressTab(true);
+    expect(deepActiveElement()?.id).toBe('fallback');
+  });
+
+  it('puts a host with tabindex="0" before its shadow content', () => {
+    const container = mountHtml('<div id="host" tabindex="0"></div>');
+    attachShadowHtml('host', '<button id="inner">inner</button>');
+    trapOf(container).activate();
+    expect(deepActiveElement()?.id).toBe('host');
+    pressTab(true);
+    expect(deepActiveElement()?.id).toBe('inner');
+  });
+
+  it('skips a host with tabindex="-1" together with its shadow content', () => {
+    const container = mountHtml('<div id="host" tabindex="-1"></div><button id="after">after</button>');
+    attachShadowHtml('host', '<button id="inner">inner</button>');
+    trapOf(container).activate();
+    expect(deepActiveElement()?.id).toBe('after');
+    pressTab(true);
+    expect(deepActiveElement()?.id).toBe('after');
+  });
+
+  it('sorts positive tabindex within the shadow root, not across the page', () => {
+    const container = mountHtml('<button id="light">light</button><div id="host"></div>');
+    attachShadowHtml('host', '<button id="s-natural">natural</button><button id="s-one" tabindex="1">one</button>');
+    trapOf(container).activate();
+    expect(deepActiveElement()?.id).toBe('light'); // s-one is not hoisted to the front of the page
+    pressTab(true);
+    expect(deepActiveElement()?.id).toBe('s-natural'); // inside the root, s-one comes first
+  });
+
+  it('skips shadow content under an inert, aria-hidden, display:none host or a closed <details>', () => {
+    const container = mountHtml(`
+      <div id="inert-host" inert></div>
+      <div id="hidden-host" aria-hidden="true"></div>
+      <div id="none-host" style="display: none"></div>
+      <details><summary id="summary">More</summary><div id="details-host"></div></details>`);
+    for (const id of ['inert-host', 'hidden-host', 'none-host', 'details-host']) {
+      attachShadowHtml(id, `<button id="${id}-button">${id}</button>`);
+    }
+    trapOf(container).activate();
+    expect(deepActiveElement()?.id).toBe('summary');
+    pressTab(true);
+    expect(deepActiveElement()?.id).toBe('summary');
+  });
+
+  it('traps inside the shadow root when the container is itself a shadow host', () => {
+    mountHtml('<div id="dialog"><button id="light">not rendered</button></div>');
+    attachShadowHtml('dialog', '<button id="a">a</button><button id="b">b</button>');
+    const dialog = document.getElementById('dialog') as HTMLElement;
+    trapOf(dialog).activate();
+    expect(deepActiveElement()).toBe(inShadow('dialog', 'a'));
+    inShadow('dialog', 'b').focus();
+    pressTab();
+    expect(deepActiveElement()).toBe(inShadow('dialog', 'a'));
+  });
+
+  it('leaves closed shadow roots alone', () => {
+    const container = mountHtml('<div id="host"></div><button id="after">after</button>');
+    attachShadowHtml('host', '<button id="inner">inner</button>', 'closed');
+    trapOf(container).activate();
+    expect(document.activeElement?.id).toBe('after');
+  });
+
+  it('returns focus to the element inside the shadow root, not its host', () => {
+    const container = mountHtml('<button id="first">first</button><div id="host"></div>');
+    attachShadowHtml('host', '<button id="a">a</button><button id="b">b</button>');
+    const outside = outsideButton();
+    trapOf(container).activate();
+    inShadow('host', 'b').focus();
+    outside.focus();
+    expect(deepActiveElement()).toBe(inShadow('host', 'b'));
+  });
+
+  it('restores focus to a trigger inside a web component', () => {
+    mountHtml('<div id="trigger-host"></div>');
+    attachShadowHtml('trigger-host', '<button id="trigger">open</button>');
+    const trigger = inShadow('trigger-host', 'trigger');
+    trigger.focus();
+    const { container } = mountContainer();
+    const trap = trapOf(container);
+    trap.activate();
+    trap.deactivate();
+    expect(deepActiveElement()).toBe(trigger);
+  });
+
+  it('does not steal focus back when the outside press lands on a button inside a web component', async () => {
+    const trigger = outsideButton();
+    trigger.focus();
+    mountHtml('<div id="other-host"></div>');
+    attachShadowHtml('other-host', '<button id="other">other</button>');
+    const other = inShadow('other-host', 'other');
+    const { container } = mountContainer();
+    const trap = trapOf(container, { clickOutsideDeactivates: true });
+    trap.activate();
+
+    other.dispatchEvent(new Event('pointerdown', { bubbles: true, cancelable: true, composed: true }));
+    other.focus(); // what the browser does on the mousedown that follows
+    await flushMutations();
+
+    expect(trap.active).toBe(false);
+    expect(deepActiveElement()).toBe(other);
   });
 });
 
